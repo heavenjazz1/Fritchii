@@ -1351,8 +1351,10 @@ void MainWindow::InitializeHotkeys() {
         SetFPSSuffix();
     });
 
+    // Fritchii personal build: the Turbo hotkey toggles a 2x guest clock (the CPU Clock
+    // "Overclock" rate) live and without a time jump, instead of raising the speed limit.
     connect_shortcut(QStringLiteral("Toggle Turbo Speed"), [this] {
-        Settings::ToggleTurboMode();
+        Core::Timing::SetFastClock(!Core::Timing::IsFastClock());
         SetFPSSuffix();
     });
 
@@ -4935,6 +4937,10 @@ void MainWindow::SetFirmwareVersion() {
 }
 
 void MainWindow::SetFPSSuffix() {
+    if (Core::Timing::IsFastClock()) {
+        m_fpsSuffix = tr("2x");
+        return;
+    }
     switch (Settings::values.current_speed_mode.GetValue()) {
     case Settings::SpeedMode::Slow:
         m_fpsSuffix = tr("Slow");

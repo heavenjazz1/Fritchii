@@ -38,6 +38,18 @@ constexpr u32 CpuClockTargetMhz(Settings::CpuClock clock) {
     }
 }
 
+namespace {
+std::atomic<bool> g_fast_clock{false};
+} // Anonymous namespace
+
+void SetFastClock(bool enabled) {
+    g_fast_clock.store(enabled);
+}
+
+bool IsFastClock() {
+    return g_fast_clock.load();
+}
+
 std::shared_ptr<EventType> CreateEvent(std::string name, TimedCallback&& callback) {
     return std::make_shared<EventType>(std::move(callback), std::move(name));
 }
@@ -70,6 +82,13 @@ void CoreTiming::Initialize(std::function<void()>&& on_thread_init_) {
     on_thread_init = std::move(on_thread_init_);
     event_fifo_id = 0;
     cpu_ticks = 0;
+    {
+        std::scoped_lock lk{clock_scale_lock};
+        clock_scale_mhz.store(0);
+        clock_anchor_raw.store(0);
+        clock_anchor_scaled.store(0);
+    }
+    g_fast_clock.store(false);
     if (is_multicore) {
         timer_thread = std::jthread([this](std::stop_token stop_token) {
             Common::SetCurrentThreadName("HostTiming");
@@ -224,17 +243,61 @@ void CoreTiming::ResetTicks() {
 }
 
 u64 CoreTiming::GetClockTicks() const {
-    u64 fres = is_multicore ? Common::g_wall_clock.GetCNTPCT() : Common::g_wall_clock.CPUTickToGuestCNTPCT(cpu_ticks);
-    if (const u32 target = CpuClockTargetMhz(Settings::values.cpu_clock.GetValue());
-        target != CPU_CLOCK_BASE_MHZ) {
-        fres = fres * target / CPU_CLOCK_BASE_MHZ;
-    }
+    const u64 raw = is_multicore ? Common::g_wall_clock.GetCNTPCT() : Common::g_wall_clock.CPUTickToGuestCNTPCT(cpu_ticks);
+    const u32 target = g_fast_clock.load(std::memory_order_relaxed)
+                           ? CPU_CLOCK_OVERCLOCK_MHZ
+                           : CpuClockTargetMhz(Settings::values.cpu_clock.GetValue());
+    const u64 fres = ScaleClockTicks(raw, target);
     if (::Settings::values.sync_core_speed.GetValue()) {
         auto const ticks = f64(fres);
         auto const speed_limit = f64(Settings::SpeedLimit()) * 0.01;
         return u64(ticks / speed_limit);
     }
     return fres;
+}
+
+u64 CoreTiming::ScaleClockTicks(u64 raw, u32 target) const {
+    if (clock_scale_mhz.load() != target) {
+        std::scoped_lock lk{clock_scale_lock};
+        const u32 current = clock_scale_mhz.load();
+        if (current != target) {
+            u64 new_raw = 0;
+            u64 new_scaled = 0;
+            if (current != 0) {
+                // Re-anchor at this instant using the old rate, so the guest counter stays
+                // continuous and only its slope changes.
+                const u64 anchor_raw = clock_anchor_raw.load();
+                const u64 anchor_scaled = clock_anchor_scaled.load();
+                new_raw = std::max(raw, anchor_raw);
+                new_scaled = anchor_scaled + (new_raw - anchor_raw) * current / CPU_CLOCK_BASE_MHZ;
+            }
+            clock_seq.fetch_add(1);
+            clock_anchor_raw.store(new_raw);
+            clock_anchor_scaled.store(new_scaled);
+            clock_scale_mhz.store(target);
+            clock_seq.fetch_add(1);
+        }
+    }
+    for (;;) {
+        const u64 seq = clock_seq.load();
+        if (seq & 1) {
+            continue;
+        }
+        const u64 anchor_raw = clock_anchor_raw.load();
+        const u64 anchor_scaled = clock_anchor_scaled.load();
+        const u32 mhz = clock_scale_mhz.load();
+        if (clock_seq.load() != seq) {
+            continue;
+        }
+        if (raw <= anchor_raw) {
+            return anchor_scaled;
+        }
+        const u64 delta = raw - anchor_raw;
+        if (mhz == CPU_CLOCK_BASE_MHZ || mhz == 0) {
+            return anchor_scaled + delta;
+        }
+        return anchor_scaled + delta * mhz / CPU_CLOCK_BASE_MHZ;
+    }
 }
 
 u64 CoreTiming::GetGPUTicks() const {
