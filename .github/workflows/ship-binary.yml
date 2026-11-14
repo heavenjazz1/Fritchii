@@ -15,7 +15,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir out
-          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -o out/build.zip "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/14105210245/zip"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -o out/build.zip "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/14105177190/zip"
           unzip -l out/build.zip | tail -3
           ls -la out
           cd out
