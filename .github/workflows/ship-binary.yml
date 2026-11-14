@@ -13,11 +13,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          gh run download 43561696669 --repo "$GITHUB_REPOSITORY" --pattern 'lichii-windows-x86_64-*' --dir art
-          find art -maxdepth 3 | head -50
+          set -euxo pipefail
           mkdir out
-          (cd art && zip -qr ../out/build.zip .)
+          gh release download build-1 --repo "$GITHUB_REPOSITORY" --pattern 'lichii-windows-x86_64.zip' --output out/build.zip
+          ls -la out
           cd out
           split -b 45m -d build.zip part-
           rm build.zip
