@@ -125,6 +125,10 @@ public:
     /// Returns the current CNTPCT tick value.
     u64 GetClockTicks() const;
 
+    /// Scales a raw guest counter by the target CPU clock, keeping the result continuous when
+    /// the target changes at runtime (no jump forwards or backwards).
+    u64 ScaleClockTicks(u64 raw, u32 target_mhz) const;
+
     /// Returns the current GPU tick value.
     u64 GetGPUTicks() const;
 
@@ -168,7 +172,18 @@ public:
     std::atomic<bool> wait_set{};
     std::atomic<bool> has_started{};
     bool is_multicore{};
+
+    // Continuous CPU clock scaling (runtime fast-clock toggle).
+    mutable std::mutex clock_scale_lock;
+    mutable std::atomic<u64> clock_seq{0};
+    mutable std::atomic<u32> clock_scale_mhz{0};
+    mutable std::atomic<u64> clock_anchor_raw{0};
+    mutable std::atomic<u64> clock_anchor_scaled{0};
 };
+
+/// Runtime 2x guest clock toggle (same rate as CPU Clock = Overclock), not saved to config.
+void SetFastClock(bool enabled);
+bool IsFastClock();
 
 /// Creates a core timing event with the given name and callback.
 ///
