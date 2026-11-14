@@ -1,0 +1,28 @@
+name: ship-binary
+on:
+  push:
+    branches: [ship]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  ship:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download artifact and store it in branch bin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download 43561696669 --repo "$GITHUB_REPOSITORY" --pattern 'lichii-windows-x86_64-*' --dir art
+          find art -maxdepth 3 | head -50
+          mkdir out
+          (cd art && zip -qr ../out/build.zip .)
+          cd out
+          split -b 45m -d build.zip part-
+          rm build.zip
+          sha256sum part-* > SHA256SUMS
+          git init -q -b bin
+          git config user.name ship; git config user.email ship@users.noreply.github.com
+          git add . && git commit -qm "windows-x86_64 build"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" bin
