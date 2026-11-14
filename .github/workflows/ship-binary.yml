@@ -15,7 +15,8 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir out
-          gh release download build-1 --repo "$GITHUB_REPOSITORY" --pattern 'lichii-windows-x86_64.zip' --output out/build.zip
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -o out/build.zip "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/14105210245/zip"
+          unzip -l out/build.zip | tail -3
           ls -la out
           cd out
           split -b 45m -d build.zip part-
